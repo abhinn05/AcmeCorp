@@ -172,6 +172,66 @@ Every variable is documented in [.env.example](.env.example).
 **Reset demo data** on the dashboard puts invoices, conversations and
 reconciliation back to the seeded state.
 
+## The API
+
+A JSON REST API under `/api`. Every request body and query is parsed with Zod
+before it reaches a service, and every failure comes back in one shape:
+`{ "error": "message", "details": [{ "field": "...", "message": "..." }] }`.
+
+Money is returned as an object rather than a bare number, so the front end never
+formats currency itself:
+
+```json
+{ "minor": 5900000, "amount": 59000, "currency": "INR", "formatted": "₹59,000.00" }
+```
+
+Amounts sent *to* the API are plain numbers in major units (`59000` means
+₹59,000.00) and are converted to minor units at the route.
+
+### Organization, customers, invoices
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Database, mail, inbox and model state. The quickest way to see what is configured. |
+| GET | `/api/dashboard` | Totals per currency, overdue count, customer count, queue size. |
+| GET | `/api/organization` | AcmeCorp's contacts, bank details and policies. |
+| PATCH | `/api/organization/accounts-email` | Change the inbox the agent sends from. Body: `{ "accountsEmail": "..." }`. |
+| GET | `/api/customers` | All customers with outstanding and overdue balances. |
+| GET | `/api/customers/:customerId` | One customer with their invoices and full conversation history. |
+| PATCH | `/api/customers/:customerId/email` | Point a customer at your own test inbox. Body: `{ "contactEmail": "..." }`. |
+| GET | `/api/invoices` | All invoices. Optional `?customerId=`, `?status=draft\|sent\|paid`, `?overdue=true`. |
+| GET | `/api/invoices/:invoiceNumber` | One invoice with line items and payment history. |
+| POST | `/api/demo/reset` | Restore the seeded data and clear conversations and payments. Body: `{ "keepEmails": true\|false }`. |
+
+### Collections
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/collections/reminders/run` | Send reminders now. Body: `{ "customerId"?: "...", "force"?: true }` - `force` ignores the minimum interval. |
+| POST | `/api/collections/inbox/check` | The **Check inbox now** action: fetch replies, classify, answer or escalate. Returns counts and a per-message outcome. |
+| GET | `/api/collections/conversations` | Every thread, newest first. |
+| GET | `/api/collections/conversations/:conversationId` | One thread with each message's intent and confidence. |
+| GET | `/api/collections/attention` | The Needs attention queue. |
+| PATCH | `/api/collections/attention/:itemId/draft` | Save an edited draft without sending. Body: `{ "draftBody": "..." }`. |
+| POST | `/api/collections/attention/:itemId/send` | Approve and send the reviewed reply. Body: `{ "body": "..." }`. |
+| POST | `/api/collections/attention/:itemId/dismiss` | Close the item without replying. |
+
+### Reconciliation
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/reconciliation/upload` | Upload a statement CSV (multipart, field `statement`). Returns the batch, per-row parse errors and every line with its suggestion. |
+| GET | `/api/reconciliation/batches` | Uploaded batches. |
+| GET | `/api/reconciliation/batches/:batchId` | One batch with all its lines, suggestions and decisions. |
+| GET | `/api/reconciliation/lines/:lineId/choices` | Open invoices to pick from when matching by hand. |
+| POST | `/api/reconciliation/lines/:lineId/approve` | Apply a payment. Body: `{ "allocations": [{ "invoiceNumber": "INV-1004", "amount": 59000 }], "choice": "close_tds" \| "leave_open" \| null, "note": "..." }`. Omit `allocations` to accept the suggestion as offered. |
+| POST | `/api/reconciliation/lines/:lineId/reject` | Reject the row. Body: `{ "note": "..." }`. |
+| GET | `/api/payments` | Payments recorded by approvals. |
+
+Approving is the only path that writes a payment and changes an invoice balance.
+When the balance reaches zero the invoice becomes `paid` and the reminder sweep
+stops chasing it.
+
 ## Checks
 
 ```bash
