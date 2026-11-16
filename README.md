@@ -56,17 +56,89 @@ at the route, so no fractional value reaches a business rule.
 
 ## Running it
 
-Prerequisites: Node 20+, Docker (or a MongoDB you point at).
+Prerequisites: Node 20+, and either Docker or a MongoDB you can point at.
+
+Four things have to be running, in this order. The database must be up
+*before* the backend starts, or the backend exits immediately (see
+Troubleshooting).
+
+**1. Configuration**
 
 ```bash
-cp .env.example .env          # then fill it in - see below
-docker compose up -d          # MongoDB on 27017, mongo-express on 8081
+cp .env.example .env
+```
 
-cd backend && npm install && npm run seed && npm run dev    # :4000
-cd frontend && npm install && npm run dev                   # :5173
+Fill it in, or leave the defaults and read "Running it without a mailbox or an
+API key" below. The file lives at the repository root and serves both services.
+
+**2. Database (MongoDB on 27017)**
+
+```bash
+docker compose up -d                 # MongoDB on 27017, mongo-express on 8081
+docker compose ps                    # wait until mongo says "healthy"
+```
+
+No Docker? Any MongoDB works. Point `MONGODB_URI` in `.env` at it, for example
+a free Atlas cluster:
+
+```
+MONGODB_URI=mongodb+srv://user:password@cluster0.xxxxx.mongodb.net
+```
+
+Or run a throwaway local server with no Docker and no install:
+
+```bash
+mkdir local-mongo && cd local-mongo
+npm init -y && npm i mongodb-memory-server
+node -e "require('mongodb-memory-server').MongoMemoryServer.create({instance:{port:27017,dbPath:'./data'}}).then(s=>console.log('READY',s.getUri()))"
+```
+
+Leave that process running; it stops when you close it.
+
+**3. Backend (port 4000)**
+
+```bash
+cd backend
+npm install
+npm run seed      # loads data/ into MongoDB; re-run any time to start over
+npm run dev
+```
+
+Wait for `API listening`. Check it with `curl http://localhost:4000/api/health`,
+which reports the database, mail, inbox and model state in one response.
+
+**4. Front end (port 5173)**
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 Open http://localhost:5173.
+
+**Stopping**
+
+Ctrl-C each dev server, then `docker compose down` (add `-v` to delete the
+database volume as well).
+
+### Troubleshooting
+
+**`MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017`**
+The backend cannot reach MongoDB, which is the one failure that stops it
+booting at all. The database is not running, or `MONGODB_URI` points somewhere
+else. Start it (step 2) and confirm with `docker compose ps` before retrying.
+Docker Desktop in particular has to have finished starting: `docker version`
+printing an empty *Server* version means the engine is still down, and
+`docker compose` will hang against it rather than report an error.
+
+**The backend ignores what is in `.env`**
+Values are read from the repository root, and `backend/.env` wins if you put
+one there. `/api/health` shows what was actually loaded.
+
+**Port already in use**
+Something is still running from a previous session. Find it with
+`npx kill-port 4000 5173`, or change `PORT` in `.env`.
 
 ### Running it without a mailbox or an API key
 
